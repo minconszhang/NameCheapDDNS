@@ -11,6 +11,13 @@ fi
 
 LOG="ddns.log"
 
+# Change to your real network interface name, e.g., en0, en1, etc.
+IP=$(curl --interface en1 -s https://api.ipify.org)
+if [[ -z "$IP" ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S')  ❌ 获取真实 IP 失败" >> "$LOG"
+  exit 1
+fi
+
 # 把 HOSTS 变量拆成数组
 read -r -a HOST_ARRAY <<< "$HOSTS"
 
