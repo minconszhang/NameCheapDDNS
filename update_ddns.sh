@@ -32,10 +32,8 @@ if [[ -z "$IP" ]]; then
   exit 1
 fi
 
-# 如果 IP 未变，则直接记录并退出
+# 如果 IP 未变，则直接退出
 if [[ "$IP" == "$PREV_IP" ]]; then
-  log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP $IP 未发生变化"
-  log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] Latest IP -> $IP"
   exit 0
 fi
 
