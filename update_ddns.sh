@@ -9,18 +9,11 @@ else
   exit 1
 fi
 
-LOG="ddns.log"
-MAX_LINES=256
+PREV_IP_FILE=".prev_ip"
 
-log() {
-  echo "$1" >> "$LOG"
-  tail -n "$MAX_LINES" "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
-}
-
-# 读取上次的 Latest IP
-if [[ -f "$LOG" ]]; then
-  last_line=$(grep '\[INFO\] Latest IP ->' "$LOG" | tail -n1)
-  PREV_IP=$(echo "$last_line" | awk -F' -> ' '{print $2}')
+# 读取上次的 IP
+if [[ -f "$PREV_IP_FILE" ]]; then
+  PREV_IP=$(cat "$PREV_IP_FILE")
 else
   PREV_IP=""
 fi
@@ -28,14 +21,17 @@ fi
 # 获取公网 IP
 IP=$(curl -4 --connect-timeout 5 --max-time 15 -s https://api.ipify.org)
 if [[ -z "$IP" ]]; then
-  echo "$(date '+%Y-%m-%d %H:%M:%S')  ❌ 获取真实 IP 失败" >> "$LOG"
+  echo "$(date '+%Y-%m-%d %H:%M:%S')  ❌ 获取真实 IP 失败" >&2
   exit 1
 fi
 
 # 如果 IP 未变，则直接退出
 if [[ "$IP" == "$PREV_IP" ]]; then
+  echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP 未变 -> ${IP}"
   exit 0
 fi
+
+echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP 变更: ${PREV_IP:-无} -> ${IP}"
 
 CF_API="https://api.cloudflare.com/client/v4"
 
@@ -59,7 +55,7 @@ for HOST in "${HOST_ARRAY[@]}"; do
   RECORD_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
 
   if [[ -z "$RECORD_ID" ]]; then
-    log "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 未找到记录 ${RECORD_NAME}"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 未找到记录 ${RECORD_NAME}" >&2
     continue
   fi
 
@@ -71,11 +67,11 @@ for HOST in "${HOST_ARRAY[@]}"; do
     "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}")
 
   if echo "$UPDATE" | grep -q '"success":true'; then
-    log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${RECORD_NAME} -> ${IP}"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${RECORD_NAME} -> ${IP}"
   else
-    log "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${RECORD_NAME} 失败"
+    echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${RECORD_NAME} 失败" >&2
   fi
 done
 
-# 最后一行写入最新 IP
-log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] Latest IP -> ${IP}"
+# 保存当前 IP
+echo "$IP" > "$PREV_IP_FILE"
