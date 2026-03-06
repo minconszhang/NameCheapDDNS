@@ -1,25 +1,25 @@
-# NameCheapDDNS
+# Cloudflare DDNS
 
-A lightweight Dynamic DNS (DDNS) solution for automatically updating DNS records using NameCheap's API.
+A lightweight Dynamic DNS (DDNS) solution for automatically updating Cloudflare DNS A records when your public IP changes.
 
 ## Overview
 
-This project provides an automated way to keep your domain's A records synchronized with your dynamic IP address. By periodically detecting your public IP and updating NameCheap's DNS records, your services remain reachable even when your ISP changes your IP.
+This project provides an automated way to keep your domain's A records synchronized with your dynamic IP address. It periodically detects your public IP and updates Cloudflare's DNS records, so your services remain reachable even when your ISP changes your IP.
 
 ## Features
 
-- Automatic public IP detection
-- Integration with NameCheap's Dynamic DNS API
-- Configurable update interval via cron
-- Support for multiple host records (e.g., @, www, or custom subdomains)
-- Detailed logging and error reporting
+- Automatic public IP detection via [ipify](https://api.ipify.org)
+- Integration with the Cloudflare DNS API
+- Docker-based deployment with automatic 60-second update interval
+- Support for multiple host records (e.g., `@`, `www`, or custom subdomains)
+- Periodic status checks every ~10 minutes to verify DNS records match the current IP
+- Only calls the Cloudflare API when an IP change is detected
 
 ## Prerequisites
 
-- A registered domain on NameCheap with DDNS enabled
-- Your Dynamic DNS password from NameCheap's Advanced DNS > Dynamic DNS panel
-- A Unix-like environment (macOS, Linux) with bash, curl, and cron
-- Basic familiarity with shell scripting and cron jobs
+- A domain managed by Cloudflare
+- A Cloudflare API token with **Zone.DNS Edit** permission
+- Docker and Docker Compose (for containerized deployment), or a Unix-like environment with `bash` and `curl`
 
 ## Installation
 
@@ -27,15 +27,10 @@ This project provides an automated way to keep your domain's A records synchroni
 
 ```bash
 git clone https://github.com/minconszhang/NameCheapDDNS.git
+cd NameCheapDDNS
 ```
 
-2. Make the update script executable:
-
-```bash
-chmod +x update_ddns.sh
-```
-
-3. Create a copy of the example environment file:
+2. Create a copy of the example environment file and fill in your credentials:
 
 ```bash
 cp .env.example .env
@@ -43,16 +38,28 @@ cp .env.example .env
 
 ## Configuration
 
-Edit the `.env` file in the project root and configure your settings:
+Edit the `.env` file with your Cloudflare settings:
 
-# .env
-
-- DOMAIN: Your registered domain name
-- PASSWORD: The Dynamic DNS password from NameCheap
-- IP: (Optional) Specify an IP address instead of auto-detection
-- HOSTS: List of hostnames (@ for root, www, etc.)
+| Variable       | Description                                                        |
+| -------------- | ------------------------------------------------------------------ |
+| `CF_API_TOKEN` | Cloudflare API token with Zone.DNS Edit permission                 |
+| `CF_ZONE_ID`   | Cloudflare Zone ID (found on your domain's overview page)          |
+| `DOMAIN`       | Your registered domain name (e.g., `example.com`)                  |
+| `HOSTS`        | Space-separated list of host records (`@` for root, `www`, etc.)   |
 
 ## Usage
+
+### Docker (recommended)
+
+```bash
+docker compose up -d
+```
+
+View logs:
+
+```bash
+docker compose logs -f
+```
 
 ### Manual Run
 
@@ -60,33 +67,12 @@ Edit the `.env` file in the project root and configure your settings:
 ./update_ddns.sh
 ```
 
-Check `ddns.log` for detailed output and any errors.
+## How It Works
 
-### Automate with Cron
-
-1. Open your crontab with:
-
-```bash
-crontab -e
-```
-
-2. Add a new line to run the script every 10 minutes (adjust interval as needed):
-
-```bash
-*/10 * * * * /pathtofile/NameCheapDDNS/update_ddns.sh
-```
-
-3. Save and exit, then verify:
-
-```bash
-crontab -l
-```
-
-The script will now execute at the specified interval.
-
-## Logging
-
-ddns.log: Per-run details including timestamps, hostnames, and API responses
+1. Fetches your public IP from `api.ipify.org`
+2. Compares it against the last recorded IP (stored in `.prev_ip`)
+3. If the IP changed, looks up each A record via the Cloudflare API and updates it
+4. Every ~10 runs (~10 minutes), performs a status check to verify all DNS records match the current IP
 
 ## License
 
