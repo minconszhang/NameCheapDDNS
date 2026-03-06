@@ -29,9 +29,9 @@ There is no test suite or linter.
 **`update_ddns.sh`** — the entire application:
 1. Loads config from `.env` (CF_API_TOKEN, CF_ZONE_ID, DOMAIN, HOSTS)
 2. Fetches public IP from `api.ipify.org` via curl
-3. Compares against the last recorded IP in `ddns.log` (grep for `[INFO] Latest IP ->`)
+3. Compares against the last recorded IP in `.prev_ip`
 4. If IP changed, for each host: looks up the A record ID via Cloudflare API, then PUTs the new IP
-5. Appends results to `ddns.log` with a rolling 256-line cap
+5. Saves current IP to `.prev_ip`; all output goes to stdout/stderr (visible via `docker compose logs`)
 
 **`.env`** — runtime configuration (not committed):
 - `CF_API_TOKEN` — Cloudflare API token with Zone.DNS Edit permission
@@ -41,7 +41,8 @@ There is no test suite or linter.
 
 ## Key Behaviors
 
-- Script exits silently (exit 0) when IP hasn't changed — no log entry, no API calls
-- Log rotation is inline: after each `log()` call, the file is trimmed to 256 lines
+- Script logs IP status every run; only calls Cloudflare API when IP changes
+- Every ~10 minutes, performs a status check: queries Cloudflare for each A record and compares against the current public IP
+- Output goes to stdout/stderr, visible via `docker compose logs`
 - Comments in the script are in Chinese (Simplified)
 - The script `cd`s to its own directory on startup, so paths are relative to the script location

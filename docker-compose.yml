@@ -3,5 +3,4 @@ services:
     build: .
     volumes:
       - ./.env:/app/.env:ro
-      - ./ddns.log:/app/ddns.log
     restart: unless-stopped

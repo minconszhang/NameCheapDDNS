@@ -10,6 +10,8 @@ else
 fi
 
 PREV_IP_FILE=".prev_ip"
+CHECK_COUNT_FILE=".check_count"
+CF_API="https://api.cloudflare.com/client/v4"
 
 # 读取上次的 IP
 if [[ -f "$PREV_IP_FILE" ]]; then
@@ -28,50 +30,84 @@ fi
 # 如果 IP 未变，则直接退出
 if [[ "$IP" == "$PREV_IP" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP 未变 -> ${IP}"
-  exit 0
+else
+  echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP 变更: ${PREV_IP:-无} -> ${IP}"
+
+  # 把 HOSTS 变量拆成数组
+  read -r -a HOST_ARRAY <<< "$HOSTS"
+
+  for HOST in "${HOST_ARRAY[@]}"; do
+    # 构建完整域名：@ 代表根域名
+    if [[ "$HOST" == "@" ]]; then
+      RECORD_NAME="$DOMAIN"
+    else
+      RECORD_NAME="${HOST}.${DOMAIN}"
+    fi
+
+    # 查询 DNS 记录 ID
+    RESPONSE=$(curl -s --connect-timeout 5 --max-time 15 \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&name=${RECORD_NAME}")
+
+    RECORD_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
+
+    if [[ -z "$RECORD_ID" ]]; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 未找到记录 ${RECORD_NAME}" >&2
+      continue
+    fi
+
+    # 更新 DNS 记录
+    UPDATE=$(curl -s --connect-timeout 5 --max-time 15 -X PUT \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      --data "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${IP}\",\"ttl\":1,\"proxied\":false}" \
+      "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}")
+
+    if echo "$UPDATE" | grep -q '"success":true'; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${RECORD_NAME} -> ${IP}"
+    else
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${RECORD_NAME} 失败" >&2
+    fi
+  done
+
+  # 保存当前 IP
+  echo "$IP" > "$PREV_IP_FILE"
 fi
 
-echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] IP 变更: ${PREV_IP:-无} -> ${IP}"
+# 每 10 次运行（约 10 分钟）执行状态检查
+COUNT=0
+if [[ -f "$CHECK_COUNT_FILE" ]]; then
+  COUNT=$(cat "$CHECK_COUNT_FILE")
+fi
+COUNT=$(( COUNT + 1 ))
 
-CF_API="https://api.cloudflare.com/client/v4"
+if [[ $COUNT -ge 10 ]]; then
+  COUNT=0
+  read -r -a HOST_ARRAY <<< "$HOSTS"
 
-# 把 HOSTS 变量拆成数组
-read -r -a HOST_ARRAY <<< "$HOSTS"
+  for HOST in "${HOST_ARRAY[@]}"; do
+    if [[ "$HOST" == "@" ]]; then
+      RECORD_NAME="$DOMAIN"
+    else
+      RECORD_NAME="${HOST}.${DOMAIN}"
+    fi
 
-for HOST in "${HOST_ARRAY[@]}"; do
-  # 构建完整域名：@ 代表根域名
-  if [[ "$HOST" == "@" ]]; then
-    RECORD_NAME="$DOMAIN"
-  else
-    RECORD_NAME="${HOST}.${DOMAIN}"
-  fi
+    RESPONSE=$(curl -s --connect-timeout 5 --max-time 15 \
+      -H "Authorization: Bearer ${CF_API_TOKEN}" \
+      -H "Content-Type: application/json" \
+      "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&name=${RECORD_NAME}")
 
-  # 查询 DNS 记录 ID
-  RESPONSE=$(curl -s --connect-timeout 5 --max-time 15 \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&name=${RECORD_NAME}")
+    RECORD_IP=$(echo "$RESPONSE" | grep -o '"content":"[^"]*"' | head -n1 | cut -d'"' -f4)
 
-  RECORD_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
+    if [[ -z "$RECORD_IP" ]]; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [CHECK] ${RECORD_NAME} -> 未找到 ❌" >&2
+    elif [[ "$RECORD_IP" == "$IP" ]]; then
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [CHECK] ${RECORD_NAME} -> ${RECORD_IP} ✅"
+    else
+      echo "$(date '+%Y-%m-%d %H:%M:%S')  [CHECK] ${RECORD_NAME} -> ${RECORD_IP} ❌ (expected ${IP})" >&2
+    fi
+  done
+fi
 
-  if [[ -z "$RECORD_ID" ]]; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 未找到记录 ${RECORD_NAME}" >&2
-    continue
-  fi
-
-  # 更新 DNS 记录
-  UPDATE=$(curl -s --connect-timeout 5 --max-time 15 -X PUT \
-    -H "Authorization: Bearer ${CF_API_TOKEN}" \
-    -H "Content-Type: application/json" \
-    --data "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${IP}\",\"ttl\":1,\"proxied\":false}" \
-    "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}")
-
-  if echo "$UPDATE" | grep -q '"success":true'; then
-    echo "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${RECORD_NAME} -> ${IP}"
-  else
-    echo "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${RECORD_NAME} 失败" >&2
-  fi
-done
-
-# 保存当前 IP
-echo "$IP" > "$PREV_IP_FILE"
+echo "$COUNT" > "$CHECK_COUNT_FILE"
