@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-NameCheapDDNS is a single-file Bash utility that automatically updates NameCheap DNS A records when the host's public IP changes. It is designed to run unattended via cron.
+A single-file Bash utility that automatically updates Cloudflare DNS A records when the host's public IP changes. Designed to run unattended via cron or Docker.
 
 ## Running
 
@@ -27,17 +27,17 @@ There is no test suite or linter.
 ## Architecture
 
 **`update_ddns.sh`** — the entire application:
-1. Loads config from `.env` (DOMAIN, PASSWORD, IP, HOSTS)
+1. Loads config from `.env` (CF_API_TOKEN, CF_ZONE_ID, DOMAIN, HOSTS)
 2. Fetches public IP from `api.ipify.org` via curl
 3. Compares against the last recorded IP in `ddns.log` (grep for `[INFO] Latest IP ->`)
-4. If IP changed, iterates over HOSTS array and calls NameCheap's DDNS API (`dynamicdns.park-your-domain.com/update`) for each host
+4. If IP changed, for each host: looks up the A record ID via Cloudflare API, then PUTs the new IP
 5. Appends results to `ddns.log` with a rolling 256-line cap
 
 **`.env`** — runtime configuration (not committed):
+- `CF_API_TOKEN` — Cloudflare API token with Zone.DNS Edit permission
+- `CF_ZONE_ID` — Cloudflare Zone ID (found on domain overview page)
 - `DOMAIN` — registered domain name
-- `PASSWORD` — NameCheap Dynamic DNS password
-- `IP` — optional manual IP override (empty = auto-detect)
-- `HOSTS` — space-separated list of host records (e.g., `@ www`)
+- `HOSTS` — space-separated list of host records (`@` for root, `www`, etc.)
 
 ## Key Behaviors
 

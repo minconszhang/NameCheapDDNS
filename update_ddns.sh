@@ -25,7 +25,7 @@ else
   PREV_IP=""
 fi
 
-# Change to your real network interface name, e.g., en0, en1, etc.
+# 获取公网 IP
 IP=$(curl -4 --connect-timeout 5 --max-time 15 -s https://api.ipify.org)
 if [[ -z "$IP" ]]; then
   echo "$(date '+%Y-%m-%d %H:%M:%S')  ❌ 获取真实 IP 失败" >> "$LOG"
@@ -37,16 +37,43 @@ if [[ "$IP" == "$PREV_IP" ]]; then
   exit 0
 fi
 
+CF_API="https://api.cloudflare.com/client/v4"
+
 # 把 HOSTS 变量拆成数组
 read -r -a HOST_ARRAY <<< "$HOSTS"
 
 for HOST in "${HOST_ARRAY[@]}"; do
-  if curl -s \
-      "https://dynamicdns.park-your-domain.com/update?host=${HOST}&domain=${DOMAIN}&password=${PASSWORD}&ip=${IP}" \
-      >/dev/null 2>&1; then
-    log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${HOST}.${DOMAIN} -> ${IP}"
+  # 构建完整域名：@ 代表根域名
+  if [[ "$HOST" == "@" ]]; then
+    RECORD_NAME="$DOMAIN"
   else
-    log "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${HOST}.${DOMAIN} 失败"
+    RECORD_NAME="${HOST}.${DOMAIN}"
+  fi
+
+  # 查询 DNS 记录 ID
+  RESPONSE=$(curl -s --connect-timeout 5 --max-time 15 \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    "${CF_API}/zones/${CF_ZONE_ID}/dns_records?type=A&name=${RECORD_NAME}")
+
+  RECORD_ID=$(echo "$RESPONSE" | grep -o '"id":"[^"]*"' | head -n1 | cut -d'"' -f4)
+
+  if [[ -z "$RECORD_ID" ]]; then
+    log "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 未找到记录 ${RECORD_NAME}"
+    continue
+  fi
+
+  # 更新 DNS 记录
+  UPDATE=$(curl -s --connect-timeout 5 --max-time 15 -X PUT \
+    -H "Authorization: Bearer ${CF_API_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "{\"type\":\"A\",\"name\":\"${RECORD_NAME}\",\"content\":\"${IP}\",\"ttl\":1,\"proxied\":false}" \
+    "${CF_API}/zones/${CF_ZONE_ID}/dns_records/${RECORD_ID}")
+
+  if echo "$UPDATE" | grep -q '"success":true'; then
+    log "$(date '+%Y-%m-%d %H:%M:%S')  [INFO] 更新 ${RECORD_NAME} -> ${IP}"
+  else
+    log "$(date '+%Y-%m-%d %H:%M:%S')  [ERROR] 更新 ${RECORD_NAME} 失败"
   fi
 done
 
